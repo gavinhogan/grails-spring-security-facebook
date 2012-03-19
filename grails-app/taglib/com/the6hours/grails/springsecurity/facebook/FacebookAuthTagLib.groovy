@@ -18,26 +18,59 @@ class FacebookAuthTagLib {
 	/** Dependency injection for springSecurityService. */
 	def springSecurityService
 
-	def connect = { attrs, body ->
+    /**
+     * @attr text OPTIONAL button text, defaults to  'button.text' config value
+     * @attr requirejs OPTIONAL provides ability to disable js output.
+     * @attr permissions OPTIONAL permissions to require of FB user.
+     */
+    def button = {attrs->
         def conf = SpringSecurityUtils.securityConfig.facebook
+        String buttonText = attrs.text?:conf.button.text
+        List permissions = parsePermissions(attrs)
+        boolean showFaces = false
+        out << "<div class=\"fb-login-button\" data-scope=\"${permissions.join(', ')}\" data-show-faces=\"${showFaces}\">$buttonText</div>"
 
+    }
+
+    /**
+     * @attr text OPTIONAL button text, defaults to  'button.text' config value
+     * @attr requirejs OPTIONAL provides ability to disable js output.
+     * @attr permissions OPTIONAL permissions to require of FB user.
+     * @attr eventHandlers OPTIONAL map of javascript call backs for FB events of form [<FBEventName>:<LocalJSMethodName>]
+     *
+     */
+	def connect = { attrs, body ->
+        if(attrs.requirejs != 'false'){
+            script(attrs)
+        }
+        button(attrs)
+    }
+    /**
+     * @attr requirejs OPTIONAL provides ability to disable js output.
+     * @attr eventHandlers OPTIONAL map of javascript call backs for FB events of form [<FBEventName>:<LocalJSMethodName>]
+     */
+    def script = {attrs->
         Boolean init = request.getAttribute(MARKER)
-        if (attrs.requirejs != 'false' && (init == null || !init)) {
+        if (init == null || !init) {
+            def conf = SpringSecurityUtils.securityConfig.facebook
             String lang = conf.language
             def appId = conf.appId
             out << '<div id="fb-root"></div>\n'
 
-            out << '<script>\n'
+            out << """
+                <script type="text/javascript">
+                    window.fbAsyncInit = function() {
+                    FB.init({
+                            appId  : '${appId}',
+                            status : true,
+                            cookie : true,
+                            xfbml  : true,
+                            oauth  : true
+                          });"""
 
-            out << "window.fbAsyncInit = function() {\n"
-            out << "  FB.init({\n"
-            out << "    appId  : '${appId}',\n"
-            out << "    status : true,\n"
-            out << "    cookie : true,\n"
-            out << "    xfbml  : true,\n"
-            out << "    oauth  : true\n"
-            out << "  });\n"
-            out << "};\n"
+            writeEventHandlers(attrs)
+
+            out << "};"
 
             out << '(function(d){'
             out << "var js, id = 'facebook-jssdk'; if (d.getElementById(id)) {return;}"
@@ -45,19 +78,23 @@ class FacebookAuthTagLib {
             out << "js.src = \"//connect.facebook.net/${lang}/all.js\";"
             out << "d.getElementsByTagName('head')[0].appendChild(js);"
             out << '}(document));\n'
-
             out << '</script>\n'
-
             request.setAttribute(MARKER, true)
         }
+    }
 
-
-        String buttonText = conf.button.text
-        if (attrs.text) {
-            buttonText = attrs.text
+    def writeEventHandlers(Map attrs) {
+        attrs.eventHandlers.each {event, function ->
+            out << """
+                     FB.Event.subscribe('$event', function(data) {
+                      if(typeof $function == 'function'){ $function(FB, data) }
+                      else if(console!=null){console.log('function "${function}" does not exists and has not been called for event "${event}"')}
+                     });"""
         }
+    }
 
-        List permissions = []
+    private List<String> parsePermissions(attrs) {
+        def permissions = []
         if (attrs.permissions) {
             if (attrs.permissions instanceof Collection) {
                 permissions = attrs.permissions.findAll {
@@ -71,10 +108,7 @@ class FacebookAuthTagLib {
                 permissions = attrs.permissions.toString().split(',').collect { it.trim() }
             }
         }
-
-        boolean showFaces = false
-
-        out << "<div class=\"fb-login-button\" data-scope=\"${permissions.join(', ')}\" data-show-faces=\"${showFaces}\">$buttonText</div>"
+        return permissions
     }
 
 }
